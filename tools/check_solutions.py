@@ -37,8 +37,14 @@ bad = 0; total = 0; ids = set()
 for w in worlds:
     for L in w["lessons"]:
         assert L["id"] not in ids, L["id"]; ids.add(L["id"])
-        assert len(L["ex"]) == 5, (L["id"], len(L["ex"]))
+        if not L.get("project"):
+            assert len(L["ex"]) == 5, (L["id"], len(L["ex"]))
         for k, ex in enumerate(L["ex"]):
+            if L.get("project") and k > 0:
+                prev = L["ex"][k - 1]["sol"]
+                ex["s"] = prev + "\n\n" + ex["add"]   # так стартовый код собирает игра
+                if not ex["sol"].startswith(prev):
+                    print(f'{L["id"]}#{k+1} | решение не продолжает решение прошлого шага')
             total += 1
             tag = f'{L["id"]}#{k+1}'
             out, err, terr = run(ex["sol"], ex.get("i", []), ex.get("test"))

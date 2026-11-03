@@ -20,14 +20,20 @@ const byId = Object.fromEntries(ALL.map(l => [l.id, l]));
 function loadState() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; }
 }
-const S = Object.assign({ xp: 0, lessons: {}, weak: {}, sound: true, unlockAll: false, streak: 0, lastDay: null, pos: 0, drafts: {}, sandbox: '' }, loadState());
+const S = Object.assign({ xp: 0, lessons: {}, weak: {}, sound: true, unlockAll: false, streak: 0, lastDay: null, pos: 0, drafts: {}, sandbox: '', proj: {} }, loadState());
+const TOTAL_TASKS = ALL.reduce((a, l) => a + l.ex.length, 0);
 let saveTimer = null;
 function save(now) {
   clearTimeout(saveTimer);
   const doit = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* приватный режим */ } };
   if (now) doit(); else saveTimer = setTimeout(doit, 300);
 }
-function LS(id) { return S.lessons[id] || (S.lessons[id] = { done: [false, false, false, false, false], stars: 0, complete: false }); }
+function LS(id) {
+  const n = byId[id] ? byId[id].ex.length : 5;
+  const st = S.lessons[id] || (S.lessons[id] = { done: [], stars: 0, complete: false });
+  while (st.done.length < n) st.done.push(false);
+  return st;
+}
 const isComplete = l => !!(S.lessons[l.id] && S.lessons[l.id].complete);
 const isUnlocked = l => S.unlockAll || l.idx === 0 || isComplete(ALL[l.idx - 1]) || isComplete(l);
 function currentIdx() {
@@ -104,6 +110,12 @@ const SPR = {
   torch: { pal: { y: '#ffcd75', o: '#ef7d57', T: '#733e39' }, frames: [['.y.', 'yoy', '.o.', '.T.', '.T.', '.T.']] },
   lavarock: { pal: { K: '#262b44', k: '#3e2731', o: '#ef7d57', y: '#ffcd75' }, frames: [['..KKKK..', '.KKoKKk.', 'KKKyoKkk', 'KoKKKKky', '.kkkkkk.']] },
   fire: { pal: { r: '#e43b44', o: '#ef7d57', y: '#ffcd75' }, frames: [['..r...', '.ror.r', '.roorr', 'rooyor', 'royyor', '.ryyr.']] },
+  arcade: { pal: { P: '#b13e53', p: '#5d275d', K: '#1a1c2c', S: '#73eff7', y: '#ffcd75', r: '#e43b44' }, frames: [[
+    'PPPPPPPP', 'PyyyyyyP', 'PKKKKKKP', 'PKSKKSKP', 'PKKSSKKP', 'PKKKKKKP', 'PPPPPPPP', 'PpKrpKKP', 'PpppppPP', 'PPPPPPPP', 'pp....pp'
+  ]] },
+  coin: { pal: { y: '#ffcd75', o: '#ef7d57', w: '#ffffff' }, frames: [['.yyy.', 'ywyyo', 'ywyyo', 'yyyyo', '.ooo.']] },
+  star: { pal: { y: '#ffffff', b: '#73eff7' }, frames: [['.b.', 'byb', '.b.']] },
+  snakeSpr: { pal: { g: '#38b764', G: '#a7f070', K: '#1a1c2c', r: '#e43b44' }, frames: [['......GG.', '.....GKGr', 'gggg.GGG.', 'g..g..g..', 'g..gggg..']] },
 };
 function spriteRects(name, frame = 0, px = 4) {
   const sp = SPR[name], rows = sp.frames[frame % sp.frames.length];
@@ -213,23 +225,103 @@ def __pq_run(code, inputs_json, test, limit):
     sys.stdout, sys.stderr = old_out, old_err
     res["inputs"] = used
     return json.dumps(res, ensure_ascii=False)
+
+_PQ_G = {}
+
+def _pq_limited(fn, limit):
+    steps = [0]
+    def tracer(frame, event, arg):
+        if frame.f_code.co_filename != "<code>":
+            return None
+        if event == "line":
+            steps[0] += 1
+            if limit and steps[0] > limit:
+                raise _PQTimeout()
+        return tracer
+    sys.settrace(tracer)
+    try:
+        return fn()
+    finally:
+        sys.settrace(None)
+
+def _pq_err(e):
+    if isinstance(e, _PQTimeout):
+        return "Функция выполнялась слишком долго (бесконечный цикл?)"
+    line = None
+    for fr in traceback.extract_tb(e.__traceback__):
+        if fr.filename == "<code>":
+            line = fr.lineno
+    msg = type(e).__name__ + (": " + str(e) if str(e) else "")
+    return msg + (f" (строка {line})" if line else "")
+
+def __pq_load(code, limit):
+    # загружает код игрока для режима игры: функции остаются в памяти
+    global _PQ_G
+    def _noinput(prompt=""):
+        raise EOFError("в режиме игры input() не используется")
+    g = {"__name__": "__pqgame__", "__builtins__": builtins, "input": _noinput}
+    old = sys.stdout
+    sys.stdout = io.StringIO()
+    err = None
+    try:
+        _pq_limited(lambda: exec(compile(code, "<code>", "exec"), g), limit)
+    except BaseException as e:
+        err = _pq_err(e)
+    finally:
+        sys.stdout = old
+    _PQ_G = g
+    return json.dumps({"err": err}, ensure_ascii=False)
+
+def _pq_tup(x):
+    # из JSON приходят списки; пары чисел [x, y] превращаем обратно в кортежи (x, y)
+    if isinstance(x, list):
+        if len(x) == 2 and all(type(v) is int for v in x):
+            return tuple(x)
+        return [_pq_tup(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _pq_tup(v) for k, v in x.items()}
+    return x
+
+def __pq_call(name, args_json, limit):
+    if name.startswith("="):
+        v = _PQ_G.get(name[1:])
+        return json.dumps({"result": v if isinstance(v, (int, float, str)) else None})
+    f = _PQ_G.get(name)
+    if not callable(f):
+        return json.dumps({"err": f"Функция {name}() не найдена — дойди до нужного шага проекта"}, ensure_ascii=False)
+    args = _pq_tup(json.loads(args_json))
+    old = sys.stdout
+    sys.stdout = io.StringIO()
+    try:
+        r = _pq_limited(lambda: f(*args), limit)
+        return json.dumps({"result": r}, ensure_ascii=False)
+    except BaseException as e:
+        return json.dumps({"err": f"{name}(): " + _pq_err(e)}, ensure_ascii=False)
+    finally:
+        sys.stdout = old
 `;
 
 function workerMain(url, runnerSrc) {
   /* eslint-disable no-undef */
-  let runFn = null;
+  let runFn = null, loadFn = null, callFn = null;
   try {
     importScripts(url + 'pyodide.js');
   } catch (e) { postMessage({ type: 'fail', msg: 'Не удалось загрузить Pyodide: ' + e }); return; }
   loadPyodide({ indexURL: url }).then(py => {
     py.runPython(runnerSrc);
     runFn = py.globals.get('__pq_run');
+    loadFn = py.globals.get('__pq_load');
+    callFn = py.globals.get('__pq_call');
     postMessage({ type: 'ready' });
   }).catch(e => postMessage({ type: 'fail', msg: String(e) }));
   onmessage = e => {
     const d = e.data;
     let json;
-    try { json = runFn(d.code, JSON.stringify(d.inputs || []), d.test || '', d.limit); }
+    try {
+      if (d.kind === 'load') json = loadFn(d.code, d.limit);
+      else if (d.kind === 'call') json = callFn(d.name, JSON.stringify(d.args || []), d.limit);
+      else json = runFn(d.code, JSON.stringify(d.inputs || []), d.test || '', d.limit);
+    }
     catch (err) { json = JSON.stringify({ out: '', err: String(err), etype: 'InternalError' }); }
     postMessage({ type: 'result', id: d.id, json });
   };
@@ -271,18 +363,28 @@ const PY = {
       const py = await window.loadPyodide({ indexURL: PYODIDE_URL });
       py.runPython(RUNNER);
       this.main = py.globals.get('__pq_run');
+      this.mainLoad = py.globals.get('__pq_load');
+      this.mainCall = py.globals.get('__pq_call');
       this.setState('ready');
     } catch (e) {
       this.setState('fail', 'Не удалось загрузить Python. Нужен интернет при первом запуске.');
     }
   },
-  run(code, inputs = [], test = '') {
+  run(code, inputs = [], test = '') { return this.request({ kind: 'run', code, inputs, test }); },
+  load(code) { return this.request({ kind: 'load', code }); },
+  call(name, ...args) { return this.request({ kind: 'call', name, args }, 3000); },
+  request(msg, timeout = RUN_TIMEOUT) {
     if (this.state !== 'ready') return Promise.resolve({ out: '', err: 'Python ещё загружается, подожди пару секунд…', etype: 'Loading' });
+    if (this.pending) return Promise.resolve({ out: '', err: 'Python занят предыдущей программой', etype: 'Busy' });
     if (this.mode === 'main') {
       return new Promise(res => setTimeout(() => {
-        try { res(JSON.parse(this.main(code, JSON.stringify(inputs), test || '', STEP_LIMIT))); }
-        catch (e) { res({ out: '', err: String(e), etype: 'InternalError' }); }
-      }, 20));
+        try {
+          const j = msg.kind === 'load' ? this.mainLoad(msg.code, STEP_LIMIT)
+            : msg.kind === 'call' ? this.mainCall(msg.name, JSON.stringify(msg.args || []), STEP_LIMIT)
+            : this.main(msg.code, JSON.stringify(msg.inputs || []), msg.test || '', STEP_LIMIT);
+          res(JSON.parse(j));
+        } catch (e) { res({ out: '', err: String(e), etype: 'InternalError' }); }
+      }, 0));
     }
     return new Promise(resolve => {
       const id = ++this.seq;
@@ -292,9 +394,9 @@ const PY = {
         this.worker.terminate();
         this.startWorker();
         resolve({ out: '', err: 'Программа выполнялась слишком долго', etype: 'Timeout' });
-      }, RUN_TIMEOUT);
+      }, timeout);
       this.pending = { id, resolve, timer };
-      this.worker.postMessage({ id, code, inputs, test, limit: STEP_LIMIT });
+      this.worker.postMessage(Object.assign({ id, limit: STEP_LIMIT }, msg));
     });
   },
 };
@@ -444,7 +546,9 @@ function toast(msg, ms = 1800) {
   const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
   document.body.appendChild(t); setTimeout(() => t.remove(), ms);
 }
+let modalCleanup = null;
 function modal(html, onMount) {
+  if (modalCleanup) { modalCleanup(); modalCleanup = null; }
   const root = $('#modal-root');
   root.innerHTML = `<div class="modal-back"><div class="modal px">${html}</div></div>`;
   const back = $('.modal-back', root);
@@ -452,7 +556,7 @@ function modal(html, onMount) {
   $$('[data-close]', root).forEach(b => b.addEventListener('click', closeModal));
   if (onMount) onMount($('.modal', root));
 }
-function closeModal() { $('#modal-root').innerHTML = ''; }
+function closeModal() { if (modalCleanup) { modalCleanup(); modalCleanup = null; } $('#modal-root').innerHTML = ''; }
 function updateHud() {
   $('#hud-streak').textContent = S.streak;
   $('#hud-lvl').textContent = level();
@@ -468,6 +572,7 @@ const THEMES = {
   mountain: { bg: '#5a6988', bg2: '#64759a', road: '#3a4466', edge: '#1a1c2c', line: '#c0cbdc', deco: ['peak', 'peak', 'rock', 'rock', 'snowpine'] },
   castle: { bg: '#3f2832', bg2: '#4a2f3b', road: '#8b9bb4', edge: '#1a1c2c', line: '#c0cbdc', deco: ['tower', 'torch', 'torch', 'rock'] },
   lava: { bg: '#2a1a24', bg2: '#33202c', road: '#262b44', edge: '#0d0e17', line: '#ef7d57', deco: ['lavarock', 'fire', 'fire', 'lavarock'] },
+  arcade: { bg: '#1d1240', bg2: '#2a1a5e', road: '#29366f', edge: '#0d0e17', line: '#73eff7', deco: ['arcade', 'coin', 'coin', 'star', 'star', 'snakeSpr'] },
 };
 const MAP_W = 400, GAP = 124, BANNER_H = 190, TOP = 30;
 const XS = [200, 300, 200, 100];
@@ -575,7 +680,7 @@ function renderMap(animate) {
     const complete = isComplete(l), open = isUnlocked(l);
     const cls = complete ? 'done' : (open ? (l.idx === cur || S.unlockAll ? 'open' : 'open') : 'locked');
     const size = (l.boss ? 64 : 52) * k;
-    const label = l.boss ? '☠' : complete ? '★' : open ? (l.idx + 1) : '🔒';
+    const label = l.project ? (open ? '🎮' : '🔒') : l.boss ? '☠' : complete ? '★' : open ? (l.idx + 1) : '🔒';
     html += `<div class="node ${cls}${l.boss ? ' boss' : ''}" data-idx="${l.idx}" style="left:${n.x * k}px;top:${n.y * k}px;width:${size}px;height:${size}px;font-size:${(open ? 13 : 12) * k}px">${label}</div>`;
     const right = n.x <= 200;
     const pos = right ? `left:${(n.x + 36) * k}px` : `right:${(MAP_W - n.x + 36) * k}px`;
@@ -669,6 +774,19 @@ function startSession() {
   renderExercise();
 }
 function exOf(it) { return it.lesson.ex[it.k]; }
+// стартовый код: в проектах — твой код прошлого шага + заготовка нового
+function starterCode(it) {
+  const ex = exOf(it);
+  if (!it.lesson.project || it.k === 0) return ex.s || '';
+  const prevKey = it.lesson.id + '#' + (it.k - 1);
+  const prev = S.proj[prevKey] || it.lesson.ex[it.k - 1].sol;
+  return prev.replace(/\s+$/, '') + '\n\n' + ex.add;
+}
+// код для запуска игры: последний решённый шаг проекта (или текущий редактор)
+function projectCode(lesson) {
+  const last = lesson.ex.length - 1;
+  return S.proj[lesson.id + '#' + last] || S.drafts[lesson.id + '#' + last] || lesson.ex[last].sol;
+}
 function draftKey(it) { return it.lesson.id + '#' + it.k; }
 
 function renderExercise() {
@@ -678,16 +796,20 @@ function renderExercise() {
   $$('#dots .dot').forEach(d => d.addEventListener('click', () => { LES.cur = +d.dataset.i; renderExercise(); }));
   // теория
   const th = $('#theory');
-  if (th.dataset.lesson !== lesson.id) {
-    th.innerHTML = lesson.theory; th.dataset.lesson = lesson.id; highlightBlocks(th);
+  const thKey = lesson.project ? lesson.id + '#' + it.k : lesson.id;
+  if (th.dataset.lesson !== thKey) {
+    th.innerHTML = lesson.project ? `<div class="tag" style="background:var(--blue);color:#111">ГАЙД · ШАГ ${it.k + 1} ИЗ ${lesson.ex.length}</div><h3 style="margin:4px 0 6px">${esc(ex.title)}</h3>${ex.guide}` : lesson.theory;
+    th.dataset.lesson = thKey; highlightBlocks(th);
+    if (lesson.project) $('#theory-card').classList.remove('collapsed');
   }
+  $('#theory-card h3').firstChild.textContent = lesson.project ? '🧭 Гайд ' : '📖 Теория ';
   $('#task-tag').innerHTML = LES.mode === 'review' ? `<span class="tag">${esc(lesson.title)}</span>` : '';
-  $('#task-num').innerHTML = `${spriteSVG('claude', 2)} Задание ${LES.cur + 1} из ${LES.items.length}`;
+  $('#task-num').innerHTML = `${spriteSVG('claude', 2)} ${lesson.project ? `Шаг ${it.k + 1} из ${lesson.ex.length}: ${esc(ex.title)}` : `Задание ${LES.cur + 1} из ${LES.items.length}`}`;
   $('#task-text').innerHTML = ex.t;
   const inp = $('#task-inputs');
   if (ex.i && ex.i.length) { inp.classList.remove('hidden'); inp.innerHTML = '⌨ Ввод для input(): ' + ex.i.map(v => `<code>${esc(v)}</code>`).join(' '); }
   else inp.classList.add('hidden');
-  lessonEd.value = S.drafts[draftKey(it)] ?? ex.s ?? '';
+  lessonEd.value = S.drafts[draftKey(it)] ?? starterCode(it);
   $('#verdict').innerHTML = ''; $('#extra').innerHTML = ''; $('#next-row').innerHTML = '';
   $('#console-body').innerHTML = '<span class="note">Нажми «Проверить» (или Ctrl+Enter), чтобы запустить код и проверить ответ.</span>';
   LES.fails = 0;
@@ -741,6 +863,7 @@ function onSolved() {
   const lvl0 = level();
   S.xp += gain; bumpStreak();
   st.done[it.k] = true;
+  if (it.lesson.project) S.proj[draftKey(it)] = lessonEd.value;
   if (!LES.revealedThis) markWeak(it, false);
   LES.revealedThis = false;
   LES.solved[LES.cur] = true;
@@ -763,6 +886,11 @@ function showNextRow(already) {
   const row = $('#next-row');
   if (allDone) row.innerHTML = `<button class="btn orange grow" id="btn-next">🏁 Завершить</button>`;
   else row.innerHTML = `<button class="btn orange grow" id="btn-next">Дальше →</button>`;
+  const it = LES.items[LES.cur];
+  if (it.lesson.project && it.k === it.lesson.ex.length - 1 && LES.solved[LES.cur]) {
+    row.insertAdjacentHTML('afterbegin', `<button class="btn blue grow" id="btn-play">🎮 Играть</button>`);
+    $('#btn-play').onclick = () => playProject(it.lesson, lessonEd.value);
+  }
   $('#btn-next').onclick = () => {
     SFX.click();
     if (allDone) return finishSession();
@@ -792,11 +920,13 @@ function finishSession() {
   const worldDone = !next || next.wi !== lesson.wi;
   const allDone = ALL.every(isComplete);
   modal(`<div class="center"><div>${spriteSVG('claude', 6, 0, 'jump')}</div>
-    <h2>${lesson.boss ? '☠ БОСС ПОВЕРЖЕН!' : worldDone && !wasComplete ? '🏆 Мир пройден!' : 'Урок пройден!'}</h2>
+    <h2>${lesson.project ? '🎮 Игра написана!' : lesson.boss ? '☠ БОСС ПОВЕРЖЕН!' : worldDone && !wasComplete ? '🏆 Мир пройден!' : 'Урок пройден!'}</h2>
     <div class="big-stars">${'★'.repeat(stars)}<span class="off">${'★'.repeat(3 - stars)}</span></div>
     <p>${esc(lesson.title)}${wasComplete ? '' : ' · +20 XP бонус'}</p>
+    ${lesson.project ? '<p>Ты написал игру сам, шаг за шагом. Жми «Играть» — она работает на твоём коде!</p>' : ''}
     <p style="color:var(--muted);font-size:13px">${stars < 3 ? 'Звёзды снимаются за просмотр решений. Пройди урок снова, чтобы получить ★★★.' : 'Идеально — без подсказок решения!'}</p>
-    <div class="row" style="justify-content:center"><button class="btn ghost" id="m-retry">↻ Ещё раз</button><button class="btn orange" id="m-map">${allDone ? '🏆 Финал' : 'На карту →'}</button></div></div>`, m => {
+    <div class="row" style="justify-content:center">${lesson.project ? '<button class="btn blue" id="m-play">🎮 Играть</button>' : ''}<button class="btn ghost" id="m-retry">↻ Ещё раз</button><button class="btn orange" id="m-map">${allDone ? '🏆 Финал' : 'На карту →'}</button></div></div>`, m => {
+    if (lesson.project) $('#m-play', m).onclick = () => { closeModal(); playProject(lesson, projectCode(lesson)); };
     $('#m-map', m).onclick = () => { closeModal(); show('map'); if (allDone && !wasComplete) setTimeout(showCertificate, 900); };
     $('#m-retry', m).onclick = () => { closeModal(); openLesson(lesson, 'replay'); };
   });
@@ -825,22 +955,27 @@ function showSolution() {
 /* ================= Повторение ================= */
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function renderReview() {
-  const done = ALL.filter(isComplete);
+  const done = ALL.filter(l => isComplete(l) && !l.project);
+  const projects = ALL.filter(l => l.project && isComplete(l));
   const weakItems = Object.keys(S.weak).map(k => { const [id, n] = k.split('#'); return byId[id] ? { lesson: byId[id], k: +n } : null; }).filter(Boolean);
   let h = `<div class="grid2">
     <div class="px mode-card" id="rv-random"><div class="pixel">🎯 Случайная тренировка</div><p>10 случайных задач из пройденных тем. Отличный способ освежить память.</p></div>
     <div class="px mode-card" id="rv-weak"><div class="pixel">🩹 Слабые места (${weakItems.length})</div><p>Задачи, где были ошибки или подсмотрено решение.</p></div>
     <div class="px mode-card" id="rv-last"><div class="pixel">🧠 Последние темы</div><p>Все задания трёх последних пройденных уроков вперемешку.</p></div>
   </div><h2>Пройденные темы</h2>`;
+  if (projects.length) {
+    h += `<h2>🎮 Мои игры</h2>`;
+    projects.forEach(l => { h += `<div class="px lrow"><div class="t"><b>${esc(l.title.replace('Проект: ', ''))}</b><small style="color:var(--muted);letter-spacing:0">работает на твоём коде</small></div><button class="btn small ghost" data-rp="${l.id}">✎ Код</button><button class="btn small blue" data-play="${l.id}">🎮 Играть</button></div>`; });
+  }
   if (!done.length) h += `<div class="px empty">Пройди первый урок — и здесь появятся темы для повторения.</div>`;
   WORLDS.forEach((w, wi) => {
-    const ls = w.lessons.filter(isComplete);
+    const ls = w.lessons.filter(l => isComplete(l) && !l.project);
     if (!ls.length) return;
     h += `<div class="pixel" style="font-size:9px;color:var(--muted);margin:16px 0 8px">МИР ${wi + 1} · ${esc(w.name)}</div>`;
     ls.forEach(l => {
       const st = S.lessons[l.id];
       h += `<div class="px lrow"><div class="t"><b>${l.idx + 1}. ${esc(l.title)}</b><small>${'★'.repeat(st.stars)}${'☆'.repeat(3 - st.stars)}</small></div>
-        <button class="btn small ghost" data-th="${l.id}" title="Шпаргалка">📖</button><button class="btn small orange" data-rp="${l.id}">↻ 5 задач</button></div>`;
+        <button class="btn small ghost" data-th="${l.id}" title="Шпаргалка">📖</button><button class="btn small orange" data-rp="${l.id}">↻ ${l.ex.length} задач</button></div>`;
     });
   });
   $('#review-page').innerHTML = h;
@@ -850,6 +985,7 @@ function renderReview() {
   $('#rv-last').onclick = () => openPractice(shuffle(done.slice(-3).flatMap(l => l.ex.map((_, k) => ({ lesson: l, k })))), '🧠 Последние темы');
   $$('[data-rp]').forEach(b => b.onclick = () => openLesson(byId[b.dataset.rp], 'replay'));
   $$('[data-th]').forEach(b => b.onclick = () => showTheory(byId[b.dataset.th]));
+  $$('[data-play]').forEach(b => b.onclick = () => { const l = byId[b.dataset.play]; playProject(l, projectCode(l)); });
 }
 function showTheory(l) {
   modal(`<h2>📖 ${esc(l.title)}</h2><div class="theory">${l.theory}</div><div class="row"><button class="btn ghost" data-close>Закрыть</button><button class="btn orange" id="m-rp">↻ Практика</button></div>`, m => {
@@ -903,10 +1039,171 @@ function showCertificate() {
   SFX.win();
   const stars = ALL.reduce((a, l) => a + ((S.lessons[l.id] || {}).stars || 0), 0);
   modal(`<div class="center"><div>${spriteSVG('claude', 7, 0, 'jump')}</div><h2>🏆 СЕРТИФИКАТ PYTHON-КОДЕРА</h2>
-    <p>Ты прошёл весь путь вместе с Claude: ${ALL.length} уроков и ${ALL.length * 5} задач!</p>
+    <p>Ты прошёл весь путь вместе с Claude: ${ALL.length} уроков, ${TOTAL_TASKS} задач и написал две свои игры!</p>
     <div class="big-stars" style="font-size:20px">★ ${stars} / ${ALL.length * 3}</div>
     <p style="color:var(--muted);font-size:14px">Что дальше: пиши свои мини-проекты в Песочнице (игра «Угадай число», калькулятор, список дел), повторяй слабые места и бери задачки посложнее.</p>
     <div class="row" style="justify-content:center"><button class="btn orange" data-close>Ура!</button></div></div>`);
+}
+
+/* ================= Игры из проектов ================= */
+async function playProject(lesson, code) {
+  if (PY.state !== 'ready') { toast('Python ещё загружается…'); return; }
+  SFX.click();
+  const r = await PY.load(code);
+  // ошибка в конце файла (например, input() в play_console) не мешает — функции уже созданы
+  const warn = r.err && !/^EOFError/.test(r.err) ? r.err : '';
+  if (lesson.play === 'snake') playSnake(warn); else playGuess(warn);
+}
+function gameErr(el, msg) {
+  el.innerHTML = `<div class="verdict bad" style="margin-top:10px"><b class="pixel">✖ Ошибка в твоём коде</b>${esc(msg)}<div style="margin-top:6px;color:var(--muted)">Исправь функцию в проекте и запусти игру снова.</div></div>`;
+  SFX.bad();
+}
+
+function playGuess(warn) {
+  modal(`<h2>🔢 Угадай число</h2>
+    <p id="g-msg">Я загадал число от 1 до 100. Попробуй угадать!</p>
+    <div class="row" style="flex-wrap:nowrap"><input id="g-in" class="g-in" inputmode="numeric" autocomplete="off" placeholder="Число"><button class="btn green" id="g-go">Проверить</button></div>
+    <div class="console" style="margin-top:12px"><div class="console-head">ПОПЫТКИ</div><div class="console-body" id="g-hist"><span class="note">Пока ни одной.</span></div></div>
+    <div id="g-err">${warn ? `<p class="note" style="color:var(--yellow);font-size:13px">⚠ ${esc(warn)}</p>` : ''}</div>
+    <p style="color:var(--muted);font-size:13px">Игра использует твои функции: <code>new_secret</code>, <code>is_valid</code>, <code>check_guess</code>, <code>rating</code>.</p>
+    <div class="row"><button class="btn ghost" id="g-new">↻ Новая игра</button><button class="btn orange" data-close>Выход</button></div>`, async m => {
+    let secret = null, attempts = 0, over = false;
+    const msg = $('#g-msg', m), hist = $('#g-hist', m), inp = $('#g-in', m), errEl = $('#g-err', m);
+    async function start() {
+      const r = await PY.call('new_secret');
+      if (r.err) return gameErr(errEl, r.err);
+      secret = r.result; attempts = 0; over = false;
+      msg.textContent = 'Я загадал число от 1 до 100. Попробуй угадать!';
+      hist.innerHTML = '<span class="note">Пока ни одной.</span>';
+      inp.value = ''; inp.focus();
+    }
+    let busy = false;
+    async function go() {
+      if (busy) return;
+      busy = true;
+      try { await guess(); } finally { busy = false; }
+    }
+    async function guess() {
+      if (over || secret === null) return;
+      const text = inp.value;
+      const v = await PY.call('is_valid', text);
+      if (v.err) return gameErr(errEl, v.err);
+      if (!v.result) { msg.textContent = 'Введи число от 1 до 100'; SFX.bad(); return; }
+      attempts++;
+      const r = await PY.call('check_guess', secret, parseInt(text, 10));
+      if (r.err) return gameErr(errEl, r.err);
+      if (attempts === 1) hist.innerHTML = '';
+      hist.insertAdjacentHTML('beforeend', `<div><span class="note">#${attempts}</span> ${esc(text.trim())} → <b>${esc(r.result)}</b></div>`);
+      hist.scrollTop = hist.scrollHeight;
+      inp.value = '';
+      if (r.result === 'Угадал!') {
+        over = true;
+        const rt = await PY.call('rating', attempts);
+        msg.innerHTML = `🎉 Угадал число <b>${secret}</b> за ${attempts} попыт${attempts % 10 === 1 && attempts !== 11 ? 'ку' : 'ок'}! <b>${esc(rt.err ? '' : rt.result)}</b>`;
+        SFX.win();
+      } else { msg.textContent = r.result; SFX.click(); inp.focus(); }
+    }
+    $('#g-go', m).onclick = go;
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    $('#g-new', m).onclick = start;
+    start();
+  });
+}
+
+function playSnake(warn) {
+  modal(`<h2>🐍 Змейка</h2>
+    <div class="sn-top"><span class="pixel" id="sn-status">Нажми «Старт»</span><span class="pixel" id="sn-best">Рекорд: ${S.best || 0}</span></div>
+    <div class="sn-wrap"><canvas id="sn-canvas"></canvas><div class="sn-over hidden" id="sn-over"></div></div>
+    <div class="dpad">
+      <button class="btn ghost" data-d="up" style="grid-area:u">▲</button>
+      <button class="btn ghost" data-d="left" style="grid-area:l">◀</button>
+      <button class="btn orange" id="sn-start" style="grid-area:c">▶</button>
+      <button class="btn ghost" data-d="right" style="grid-area:r">▶</button>
+      <button class="btn ghost" data-d="down" style="grid-area:d">▼</button>
+    </div>
+    <p style="color:var(--muted);font-size:13px;text-align:center;margin:8px 0 0">Стрелки / WASD · свайпы · кнопки. Каждый ход — вызов твоей <code>step()</code>.</p>
+    <div id="sn-err">${warn ? `<p style="color:var(--yellow);font-size:13px">⚠ ${esc(warn)}</p>` : ''}</div>
+    <div class="row" style="justify-content:flex-end"><button class="btn orange" data-close>Выход</button></div>`, async m => {
+    const cv = $('#sn-canvas', m), ctx = cv.getContext('2d');
+    const statusEl = $('#sn-status', m), errEl = $('#sn-err', m), over = $('#sn-over', m);
+    let W = 15, H = 15, state = null, running = false, timer = null, delay = 160, alive = true;
+    const C = 24;
+    const wv = await PY.call('=WIDTH'), hv = await PY.call('=HEIGHT');
+    if (Number.isInteger(wv.result) && wv.result >= 5 && wv.result <= 40) W = wv.result;
+    if (Number.isInteger(hv.result) && hv.result >= 5 && hv.result <= 40) H = hv.result;
+    cv.width = W * C; cv.height = H * C;
+    function draw() {
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { ctx.fillStyle = (x + y) % 2 ? '#1f2a3d' : '#243049'; ctx.fillRect(x * C, y * C, C, C); }
+      if (!state) return;
+      const f = state.food;
+      if (Array.isArray(f)) { // пиксельное яблоко
+        const fx = f[0] * C, fy = f[1] * C, p = C / 8;
+        ctx.fillStyle = '#e43b44'; ctx.fillRect(fx + p, fy + 2 * p, 6 * p, 5 * p); ctx.fillRect(fx + 2 * p, fy + 7 * p, 4 * p, p);
+        ctx.fillStyle = '#ff8a8a'; ctx.fillRect(fx + 2 * p, fy + 3 * p, p, 2 * p);
+        ctx.fillStyle = '#38b764'; ctx.fillRect(fx + 4 * p, fy, 2 * p, 2 * p);
+      }
+      (state.snake || []).forEach((c, i) => {
+        if (!Array.isArray(c)) return;
+        ctx.fillStyle = i === 0 ? '#a7f070' : (i % 2 ? '#38b764' : '#2e9c55');
+        ctx.fillRect(c[0] * C + 1, c[1] * C + 1, C - 2, C - 2);
+        if (i === 0) {
+          ctx.fillStyle = '#1a1c2c'; const p = C / 8;
+          const d = state.dir;
+          const eyes = d === 'up' ? [[2, 2], [5, 2]] : d === 'down' ? [[2, 5], [5, 5]] : d === 'left' ? [[2, 2], [2, 5]] : [[5, 2], [5, 5]];
+          eyes.forEach(([ex, ey]) => ctx.fillRect(c[0] * C + ex * p, c[1] * C + ey * p, p + 1, p + 1));
+        }
+      });
+    }
+    async function refreshStatus() {
+      const s = await PY.call('status', state);
+      statusEl.textContent = s.err ? `Счёт: ${state.score}` : String(s.result);
+      const sp = await PY.call('speed', state.score || 0);
+      delay = !sp.err && typeof sp.result === 'number' ? Math.max(40, Math.min(1000, sp.result)) : 160;
+    }
+    async function start() {
+      clearTimeout(timer); errEl.innerHTML = ''; over.classList.add('hidden');
+      const r = await PY.call('new_game');
+      if (r.err) return gameErr(errEl, r.err);
+      state = r.result; running = true; alive = true;
+      draw(); await refreshStatus();
+      timer = setTimeout(tick, delay);
+    }
+    async function tick() {
+      if (!running) return;
+      const prevScore = state.score;
+      const r = await PY.call('step', state);
+      if (!running) return;
+      if (r.err || !r.result || typeof r.result !== 'object') { running = false; return gameErr(errEl, r.err || 'step() должна вернуть словарь состояния'); }
+      state = r.result; draw();
+      if (state.score !== prevScore || !state.alive) await refreshStatus();
+      if (state.score > prevScore) beep([880, 1320], 'square', 0.05, 0.04);
+      if (!state.alive) {
+        running = false; SFX.bad();
+        if ((state.score || 0) > (S.best || 0)) { S.best = state.score; save(); $('#sn-best', m).textContent = `Рекорд: ${S.best}`; }
+        over.innerHTML = `<div class="pixel">GAME OVER</div><div>Счёт: ${state.score}</div><button class="btn orange" id="sn-again">↻ Ещё раз</button>`;
+        over.classList.remove('hidden');
+        $('#sn-again', m).onclick = start;
+        return;
+      }
+      timer = setTimeout(tick, delay);
+    }
+    function turn(d) { if (state && running) state.next_dir = d; else if (!running) start(); }
+    const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right', W: 'up', S: 'down', A: 'left', D: 'right', 'ц': 'up', 'ы': 'down', 'ф': 'left', 'в': 'right' };
+    const onKey = e => { const d = KEYS[e.key]; if (d) { e.preventDefault(); turn(d); } else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!running) start(); } };
+    document.addEventListener('keydown', onKey);
+    let t0 = null;
+    cv.addEventListener('touchstart', e => { t0 = e.touches[0]; e.preventDefault(); }, { passive: false });
+    cv.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+    cv.addEventListener('touchend', e => {
+      if (!t0) return; const t = e.changedTouches[0], dx = t.clientX - t0.clientX, dy = t.clientY - t0.clientY; t0 = null;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) { if (!running) start(); return; }
+      turn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+    });
+    $$('[data-d]', m).forEach(b => b.addEventListener('pointerdown', e => { e.preventDefault(); turn(b.dataset.d); }));
+    $('#sn-start', m).onclick = start;
+    modalCleanup = () => { running = false; clearTimeout(timer); document.removeEventListener('keydown', onKey); };
+    draw();
+  });
 }
 
 /* ================= Песочница ================= */
@@ -936,7 +1233,7 @@ function init() {
   $('#btn-check').onclick = () => runLesson(true);
   $('#btn-hint').onclick = showHint;
   $('#btn-sol').onclick = showSolution;
-  $('#btn-reset').onclick = () => { const it = LES.items[LES.cur]; delete S.drafts[draftKey(it)]; lessonEd.value = exOf(it).s || ''; save(); };
+  $('#btn-reset').onclick = () => { const it = LES.items[LES.cur]; delete S.drafts[draftKey(it)]; lessonEd.value = starterCode(it); save(); };
   $('#btn-back').onclick = () => { SFX.click(); show(LES && LES.mode === 'review' ? 'review' : 'map'); };
   $('#btn-theory-toggle').onclick = e => { const c = $('#theory-card').classList.toggle('collapsed'); e.target.textContent = c ? 'Развернуть' : 'Свернуть'; };
   $('#btn-review').onclick = () => { SFX.click(); show('review'); };
@@ -956,7 +1253,7 @@ function init() {
   if (!S.seenIntro) {
     S.seenIntro = true; save();
     modal(`<div class="center"><div>${spriteSVG('claude', 7, 0, 'jump')}</div><h2>Привет! Я Claude 👋</h2>
-      <p>Вместе мы пройдём путь от «что такое print?» до классов и файлов. ${ALL.length} уроков в 7 мирах, в каждом — теория и <b>5 заданий</b>, чтобы синтаксис отложился в пальцах.</p>
+      <p>Вместе мы пройдём путь от «что такое print?» до классов и файлов. ${ALL.length} уроков в ${WORLDS.length} мирах, в каждом — теория и <b>5 заданий</b>, чтобы синтаксис отложился в пальцах. А в конце — пошаговые проекты: напишем свою <b>Змейку</b>!</p>
       <p style="color:var(--muted);font-size:14px">Код выполняется настоящим Python прямо в браузере. Пройденные темы можно повторять в разделе ↻.</p>
       <div class="row" style="justify-content:center"><button class="btn orange" id="m-go">▶ Поехали!</button></div></div>`, m => {
       $('#m-go', m).onclick = () => { closeModal(); SFX.ok(); openLesson(ALL[0], 'lesson'); };

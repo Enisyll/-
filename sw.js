@@ -1,6 +1,6 @@
 // Service worker: игра работает офлайн после первого запуска
-const CACHE = 'pyquest-v1';
-const APP = ['./', 'index.html', 'manifest.webmanifest', 'js/game.js', 'js/w0.js', 'js/w1.js', 'js/w2.js', 'js/w3.js', 'js/w4.js', 'js/w5.js', 'js/w6.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
+const CACHE = 'pyquest-v2';
+const APP = ['./', 'index.html', 'manifest.webmanifest', 'js/game.js', 'js/w0.js', 'js/w1.js', 'js/w2.js', 'js/w3.js', 'js/w4.js', 'js/w5.js', 'js/w6.js', 'js/w7.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(APP)).then(() => self.skipWaiting()));
