@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PyQuest: путь Claude</title>
+<meta name="description" content="Пиксельная игра для изучения Python с нуля до уверенного кодера">
+<meta name="theme-color" content="#1a1c2c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PyQuest">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #1a1c2c;
+  --bg2: #262b44;
+  --panel: #333c57;
+  --panel2: #29304a;
+  --ink: #f4f4f4;
+  --muted: #a7b0c8;
+  --line: #0d0e17;
+  --orange: #d97757;
+  --orange2: #f0a07d;
+  --green: #38b764;
+  --green2: #a7f070;
+  --red: #e43b44;
+  --yellow: #ffcd75;
+  --blue: #41a6f6;
+  --purple: #b55088;
+  --code-bg: #14152a;
+  --px: 4px;
+  --pixel: "Press Start 2P", monospace;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+button { font: inherit; color: inherit; }
+code { font-family: var(--mono); background: rgba(0,0,0,.35); padding: 1px 5px; color: var(--yellow); white-space: nowrap; }
+.hidden { display: none !important; }
+
+/* ---------- пиксельные блоки ---------- */
+.px {
+  background: var(--panel);
+  border: var(--px) solid var(--line);
+  box-shadow: inset calc(-1 * var(--px)) calc(-1 * var(--px)) 0 rgba(0,0,0,.28),
+              inset var(--px) var(--px) 0 rgba(255,255,255,.08);
+}
+.btn {
+  font-family: var(--pixel);
+  font-size: 11px;
+  line-height: 1.3;
+  padding: 11px 14px 13px;
+  background: var(--panel);
+  border: var(--px) solid var(--line);
+  box-shadow: inset -4px -4px 0 rgba(0,0,0,.3), inset 4px 4px 0 rgba(255,255,255,.18);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  white-space: nowrap;
+}
+.btn:active { box-shadow: inset 4px 4px 0 rgba(0,0,0,.35); transform: translateY(2px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn.orange { background: var(--orange); color: #1a1c2c; }
+.btn.green { background: var(--green); color: #10141f; }
+.btn.blue { background: var(--blue); color: #10141f; }
+.btn.yellow { background: var(--yellow); color: #1a1c2c; }
+.btn.red { background: var(--red); }
+.btn.ghost { background: var(--bg2); }
+.btn.small { font-size: 9px; padding: 8px 10px 10px; }
+.btn.icon { padding: 9px 11px 11px; font-size: 13px; }
+h1, h2, h3, .pixel { font-family: var(--pixel); font-weight: normal; line-height: 1.5; }
+
+/* ---------- верхняя панель ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  background: var(--bg2);
+  border-bottom: var(--px) solid var(--line);
+}
+.logo { font-family: var(--pixel); font-size: 13px; color: var(--orange); white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+.logo span { color: var(--yellow); }
+.spacer { flex: 1; }
+.hud { display: flex; gap: 8px; align-items: center; font-family: var(--pixel); font-size: 10px; }
+.chip { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg); border: 3px solid var(--line); white-space: nowrap; }
+.lvlbar { width: 60px; height: 8px; background: #000; border: 2px solid var(--line); }
+.lvlbar i { display: block; height: 100%; background: var(--green2); }
+
+/* ---------- экраны ---------- */
+.screen { min-height: 100vh; }
+#map-scroll { position: relative; overflow-x: hidden; }
+#map { position: relative; margin: 0 auto; }
+#map svg { display: block; image-rendering: pixelated; }
+.node {
+  position: absolute; transform: translate(-50%, -50%);
+  font-family: var(--pixel); font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+  border: 4px solid var(--line);
+  box-shadow: inset -5px -5px 0 rgba(0,0,0,.3), inset 5px 5px 0 rgba(255,255,255,.25), 0 6px 0 var(--line);
+  cursor: pointer; touch-action: manipulation;
+  color: #10141f;
+}
+.node.locked { background: #5d6680; color: #2c3248; cursor: pointer; }
+.node.open { background: var(--orange); animation: pulse 1.2s steps(2) infinite; }
+.node.done { background: var(--green); }
+.node.boss { background: var(--red); color: #fff; }
+.node.boss.locked { background: #6b3a45; color: #a87a85; }
+.node.boss.done { background: var(--yellow); color: #1a1c2c; }
+@keyframes pulse { 50% { box-shadow: inset -5px -5px 0 rgba(0,0,0,.3), inset 5px 5px 0 rgba(255,255,255,.25), 0 6px 0 var(--line), 0 0 0 6px rgba(255,205,117,.55); } }
+.nlabel {
+  position: absolute; transform: translateY(-50%);
+  max-width: 150px;
+  font-family: var(--pixel); font-size: 8px; line-height: 1.6;
+  padding: 5px 7px 6px; background: rgba(16,18,32,.82); border: 3px solid var(--line);
+  pointer-events: none;
+}
+.nlabel .stars { color: var(--yellow); letter-spacing: 2px; display: block; margin-top: 2px; }
+.nlabel.locked { color: #8a93ad; }
+.banner {
+  position: absolute; left: 50%; transform: translate(-50%, -50%);
+  text-align: center; padding: 10px 16px 12px; min-width: 240px;
+  background: var(--bg2); border: 4px solid var(--line);
+  box-shadow: inset -4px -4px 0 rgba(0,0,0,.3), 0 6px 0 var(--line);
+  pointer-events: none;
+}
+.banner .w { font-family: var(--pixel); font-size: 9px; color: var(--muted); }
+.banner .n { font-family: var(--pixel); font-size: 12px; color: var(--yellow); margin: 6px 0 4px; }
+.banner .s { font-size: 12px; color: var(--muted); }
+#claude { position: absolute; z-index: 5; pointer-events: none; transform: translate(-50%, -100%); }
+#claude .bob { animation: bob .8s steps(2) infinite; }
+@keyframes bob { 50% { transform: translateY(-4px); } }
+.bubble {
+  position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  margin-bottom: 6px; white-space: nowrap;
+  font-family: var(--pixel); font-size: 8px; padding: 6px 8px; background: #fff; color: #111; border: 3px solid var(--line);
+}
+.map-fab { position: fixed; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 20; }
+
+/* ---------- урок ---------- */
+.lesson-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lesson-title { font-family: var(--pixel); font-size: 11px; line-height: 1.6; flex: 1; min-width: 120px; }
+.dots { display: flex; gap: 6px; }
+.dot { width: 22px; height: 22px; border: 3px solid var(--line); background: var(--bg); cursor: pointer; font-family: var(--pixel); font-size: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); padding: 0; }
+.dot.done { background: var(--green); color: #10141f; }
+.dot.cur { outline: 3px solid var(--yellow); outline-offset: 1px; }
+.lesson-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 14px 12px calc(30px + env(safe-area-inset-bottom)); max-width: 1280px; margin: 0 auto; }
+@media (min-width: 960px) {
+  .lesson-body { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: start; }
+  .theory-card { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; }
+}
+.card { padding: 14px 16px; }
+.card h3 { font-size: 11px; margin: 0 0 10px; color: var(--yellow); display: flex; align-items: center; gap: 8px; }
+.theory p { margin: 8px 0; }
+.theory pre, pre.code {
+  font-family: var(--mono); font-size: 14px; line-height: 1.5;
+  background: var(--code-bg); border: 3px solid var(--line);
+  padding: 10px 12px; overflow-x: auto; margin: 10px 0; white-space: pre;
+}
+.theory pre code, pre.code code { background: none; padding: 0; color: inherit; white-space: pre; }
+.theory-toggle { margin-left: auto; }
+.theory-card.collapsed .theory { display: none; }
+.task-text { font-size: 15px; margin: 0 0 10px; }
+.inputs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.inputs code { color: var(--green2); }
+.tag { display: inline-block; font-family: var(--pixel); font-size: 8px; padding: 4px 6px; background: var(--purple); border: 2px solid var(--line); margin-bottom: 8px; }
+
+/* ---------- редактор ---------- */
+.editor { display: flex; background: var(--code-bg); border: var(--px) solid var(--line); position: relative; }
+.gutter {
+  flex: none; padding: 10px 6px 10px 8px; text-align: right; color: #4c557a;
+  font-family: var(--mono); font-size: 16px; line-height: 24px; user-select: none; -webkit-user-select: none;
+  border-right: 3px solid #23264a; min-width: 36px; white-space: pre;
+}
+.ed-wrap { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.ed-wrap pre, .ed-wrap textarea {
+  margin: 0; border: 0; padding: 10px 12px;
+  font-family: var(--mono); font-size: 16px; line-height: 24px; tab-size: 4;
+  white-space: pre; overflow-wrap: normal; word-break: normal; letter-spacing: 0;
+}
+.ed-wrap pre { position: absolute; inset: 0; pointer-events: none; overflow: hidden; color: var(--ink); }
+.ed-wrap pre code { background: none; padding: 0; color: inherit; white-space: pre; display: block; }
+.ed-wrap textarea {
+  position: relative; display: block; width: 100%; resize: none; outline: none;
+  background: transparent; color: transparent; caret-color: var(--yellow);
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-text-fill-color: transparent;
+}
+.ed-wrap textarea::selection { background: rgba(65,166,246,.4); -webkit-text-fill-color: transparent; }
+.editor:focus-within { border-color: #000; box-shadow: 0 0 0 3px var(--orange); }
+/* подсветка */
+.t-kw { color: #ff79c6; }
+.t-bi { color: #8be9fd; }
+.t-fn { color: #50fa7b; }
+.t-str { color: #f1fa8c; }
+.t-num { color: #ffb86c; }
+.t-com { color: #6272a4; font-style: italic; }
+.t-self { color: #ffb0a0; }
+
+.symbar { display: flex; gap: 5px; overflow-x: auto; padding: 8px 0 2px; scrollbar-width: none; }
+.symbar::-webkit-scrollbar { display: none; }
+.symbar button {
+  flex: none; min-width: 38px; height: 38px; padding: 0 8px;
+  font-family: var(--mono); font-size: 16px; font-weight: 700;
+  background: var(--bg2); border: 3px solid var(--line); color: var(--ink);
+  box-shadow: inset -3px -3px 0 rgba(0,0,0,.3); touch-action: manipulation;
+}
+.symbar button:active { background: var(--orange); color: #111; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.actions .grow { flex: 1; }
+
+/* ---------- консоль ---------- */
+.console {
+  margin-top: 12px; background: #0b0c16; border: var(--px) solid var(--line);
+  font-family: var(--mono); font-size: 14px; min-height: 90px;
+}
+.console-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #15172b; border-bottom: 3px solid var(--line); font-family: var(--pixel); font-size: 8px; color: var(--muted); }
+.console-body { padding: 10px 12px; white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto; }
+.console .out { color: #e8e8e8; }
+.console .in { color: var(--green2); }
+.console .err { color: #ff6b74; }
+.console .note { color: var(--muted); }
+.verdict { margin-top: 12px; padding: 12px 14px; border: var(--px) solid var(--line); font-size: 14px; }
+.verdict.ok { background: #1f4d36; }
+.verdict.bad { background: #4d1f27; }
+.verdict b.pixel { font-size: 11px; display: block; margin-bottom: 6px; }
+.verdict .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.verdict .cmp div { background: rgba(0,0,0,.3); padding: 6px 8px; white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+.verdict .cmp small { display: block; font-family: var(--pixel); font-size: 7px; color: var(--muted); margin-bottom: 4px; }
+.hintbox { margin-top: 12px; padding: 10px 12px; background: #3d3520; border: 3px solid var(--line); white-space: pre-wrap; font-size: 14px; }
+.hintbox.sol { background: #20303d; }
+.hintbox pre { margin: 8px 0 0; }
+
+/* ---------- загрузка Python ---------- */
+.pystatus { font-family: var(--pixel); font-size: 8px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.led { width: 10px; height: 10px; border: 2px solid var(--line); background: var(--yellow); animation: blink .6s steps(2) infinite; flex: none; }
+.led.ok { background: var(--green2); animation: none; }
+.led.bad { background: var(--red); animation: none; }
+@keyframes blink { 50% { opacity: .3; } }
+
+/* ---------- модальные окна ---------- */
+.modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(8,9,18,.78); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { width: 100%; max-width: 560px; max-height: calc(100vh - 32px); overflow: auto; padding: 18px; }
+.modal h2 { font-size: 13px; color: var(--yellow); margin: 0 0 14px; line-height: 1.6; }
+.modal .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.modal textarea.plain { width: 100%; min-height: 90px; font-family: var(--mono); font-size: 14px; background: var(--code-bg); color: var(--ink); border: 3px solid var(--line); padding: 8px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 2px dashed #4a5372; }
+.center { text-align: center; }
+.big-stars { font-size: 34px; color: var(--yellow); letter-spacing: 6px; margin: 10px 0; font-family: var(--pixel); }
+.big-stars .off { color: #4a5372; }
+
+/* ---------- повторение ---------- */
+.page { max-width: 900px; margin: 0 auto; padding: 16px 12px calc(40px + env(safe-area-inset-bottom)); }
+.page h2 { font-size: 13px; color: var(--yellow); margin: 22px 0 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.mode-card { padding: 16px; cursor: pointer; }
+.mode-card .pixel { font-size: 11px; margin-bottom: 8px; color: var(--yellow); }
+.mode-card p { margin: 0; color: var(--muted); font-size: 14px; }
+.lrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.lrow .t { flex: 1; min-width: 0; }
+.lrow .t b { font-family: var(--pixel); font-size: 9px; font-weight: normal; display: block; line-height: 1.6; }
+.lrow .t small { color: var(--yellow); letter-spacing: 2px; }
+.empty { color: var(--muted); padding: 16px; text-align: center; }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  z-index: 200; font-family: var(--pixel); font-size: 10px; padding: 12px 16px; background: var(--yellow); color: #1a1c2c; border: 4px solid var(--line);
+  animation: pop .25s steps(3);
+}
+@keyframes pop { from { transform: translate(-50%, 20px); opacity: 0; } }
+.jump { animation: jump .5s steps(4) 2; }
+@keyframes jump { 50% { transform: translateY(-14px); } }
+@media (max-width: 520px) {
+  .logo .full { display: none; }
+  .topbar { gap: 6px; padding-left: 8px; padding-right: 8px; }
+  .btn.icon { padding: 7px 8px 9px; font-size: 11px; }
+  .hud { gap: 4px; font-size: 9px; }
+  .chip { padding: 5px 6px; }
+  .card { padding: 12px 10px; }
+  .hud .lvlbar { display: none; }
+  .btn { font-size: 10px; }
+  .verdict .cmp { grid-template-columns: 1fr; }
+}
+@media (max-width: 400px) { .logo > div { display: none; } }
+</style>
+</head>
+<body>
+
+<!-- ======== КАРТА ======== -->
+<section id="screen-map" class="screen">
+  <header class="topbar">
+    <div class="logo"><span id="logo-claude"></span><div>Py<span>Quest</span><span class="full" style="color:var(--muted)"> · путь Claude</span></div></div>
+    <div class="spacer"></div>
+    <div class="hud">
+      <div class="chip" title="Серия дней">🔥 <b id="hud-streak">0</b></div>
+      <div class="chip" title="Уровень и опыт">LV <b id="hud-lvl">1</b><div class="lvlbar"><i id="hud-bar"></i></div></div>
+    </div>
+    <button class="btn icon ghost" id="btn-review" title="Повторение">↻</button>
+    <button class="btn icon ghost" id="btn-sandbox" title="Песочница">{}</button>
+    <button class="btn icon ghost" id="btn-settings" title="Настройки">⚙</button>
+  </header>
+  <div id="map-scroll"><div id="map"></div></div>
+  <button class="btn orange map-fab" id="btn-continue">▶ Продолжить</button>
+</section>
+
+<!-- ======== УРОК ======== -->
+<section id="screen-lesson" class="screen hidden">
+  <header class="topbar lesson-head">
+    <button class="btn icon ghost" id="btn-back" title="На карту">←</button>
+    <div class="lesson-title" id="lesson-title"></div>
+    <div class="dots" id="dots"></div>
+  </header>
+  <div class="lesson-body">
+    <div class="card px theory-card" id="theory-card">
+      <h3>📖 Теория <button class="btn small ghost theory-toggle" id="btn-theory-toggle">Свернуть</button></h3>
+      <div class="theory" id="theory"></div>
+    </div>
+    <div class="card px" id="task-card">
+      <div id="task-tag"></div>
+      <h3 id="task-num">Задание</h3>
+      <div class="task-text" id="task-text"></div>
+      <div class="inputs hidden" id="task-inputs"></div>
+      <div id="lesson-editor"></div>
+      <div class="actions">
+        <button class="btn ghost" id="btn-run" title="Ctrl+Shift+Enter">▶ Запуск</button>
+        <button class="btn green grow" id="btn-check" title="Ctrl+Enter">✓ Проверить</button>
+        <button class="btn yellow" id="btn-hint">💡</button>
+        <button class="btn ghost" id="btn-sol" title="Показать решение">👁</button>
+        <button class="btn ghost" id="btn-reset" title="Вернуть исходный код">⟲</button>
+      </div>
+      <div id="extra"></div>
+      <div id="verdict"></div>
+      <div class="console" id="lesson-console">
+        <div class="console-head"><span>КОНСОЛЬ</span><div class="spacer"></div><div class="pystatus"><span class="led" id="led1"></span><span id="pystat1">Python загружается…</span></div></div>
+        <div class="console-body" id="console-body"><span class="note">Здесь появится вывод твоей программы.</span></div>
+      </div>
+      <div class="actions" id="next-row"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== ПОВТОРЕНИЕ ======== -->
+<section id="screen-review" class="screen hidden">
+  <header class="topbar">
+    <button class="btn icon ghost" data-go="map">←</button>
+    <div class="logo">Повторение</div>
+  </header>
+  <div class="page" id="review-page"></div>
+</section>
+
+<!-- ======== ПЕСОЧНИЦА ======== -->
+<section id="screen-sandbox" class="screen hidden">
+  <header class="topbar">
+    <button class="btn icon ghost" data-go="map">←</button>
+    <div class="logo">Песочница</div>
+    <div class="spacer"></div>
+    <div class="pystatus"><span class="led" id="led2"></span><span id="pystat2"></span></div>
+  </header>
+  <div class="page">
+    <p style="color:var(--muted);margin-top:0">Пиши любой код на Python и запускай. Если программа использует <code>input()</code>, впиши значения ниже — по одному на строку.</p>
+    <div id="sandbox-editor"></div>
+    <div style="margin-top:10px"><textarea class="plain" id="sandbox-input" placeholder="Ввод для input() — каждое значение с новой строки" style="width:100%;min-height:60px;font-family:var(--mono);font-size:16px;background:var(--code-bg);color:var(--ink);border:4px solid var(--line);padding:8px"></textarea></div>
+    <div class="actions"><button class="btn green grow" id="btn-sb-run">▶ Запустить</button><button class="btn ghost" id="btn-sb-clear">Очистить</button></div>
+    <div class="console"><div class="console-head">КОНСОЛЬ</div><div class="console-body" id="sb-console"><span class="note">Вывод появится здесь.</span></div></div>
+  </div>
+</section>
+
+<div id="modal-root"></div>
+
+<script src="js/w0.js"></script>
+<script src="js/w1.js"></script>
+<script src="js/w2.js"></script>
+<script src="js/w3.js"></script>
+<script src="js/w4.js"></script>
+<script src="js/w5.js"></script>
+<script src="js/w6.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>

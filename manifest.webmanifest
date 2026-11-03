@@ -1,0 +1,16 @@
+{
+  "name": "PyQuest: путь Claude",
+  "short_name": "PyQuest",
+  "description": "Пиксельная игра для изучения Python с нуля",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a1c2c",
+  "theme_color": "#1a1c2c",
+  "lang": "ru",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
